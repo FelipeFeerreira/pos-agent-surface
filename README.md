@@ -1,5 +1,7 @@
 # Case de agentic engineering — PDV do mercadinho como superfície de agente
 
+![CI](https://github.com/FelipeFeerreira/pos-agent-surface/actions/workflows/ci.yml/badge.svg)
+
 ## O que é
 Um case público, em um repositório pequeno, que mostra a habilidade que Karpathy chama de *agentic engineering*: usar agentes para entregar software de verdade, com spec, testes, permissões e revisão — e não só "vibe coding".
 
@@ -21,6 +23,10 @@ agentic-engineering-case/
     ├── mcp_server.py  # wrapper MCP (não testado: pacote `mcp` ausente)
     └── README.md      # uso, contrato de saída, como plugar no PDV
 ```
+
+## Testes
+`pytest -q tests/` cobre o contrato do CLI (somas, cancelamento, estorno, validade e read-only);
+o workflow em `.github/workflows/ci.yml` roda os testes em Python 3.11 e 3.13 e sobe o servidor MCP via stdio.
 
 ## Estado (27/10/2026)
 - Publicado em [github.com/FelipeFeerreira/pos-agent-surface](https://github.com/FelipeFeerreira/pos-agent-surface).
