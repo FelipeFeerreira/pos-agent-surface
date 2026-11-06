@@ -1,50 +1,90 @@
-# Case de agentic engineering — PDV do mercadinho como superfície de agente
+# POS agent surface — read-only queries for an agent, over a real point-of-sale database
 
-![CI](https://github.com/FelipeFeerreira/pos-agent-surface/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/FelipeFeerreira/pos-agent-surface/actions/workflows/ci.yml/badge.svg)](https://github.com/FelipeFeerreira/pos-agent-surface/actions/workflows/ci.yml)
 
-## O que é
-Um case público, em um repositório pequeno, que mostra a habilidade que Karpathy chama de *agentic engineering*: usar agentes para entregar software de verdade, com spec, testes, permissões e revisão — e não só "vibe coding".
+A small, public case in **agentic engineering**: a real product built with a written spec, contract tests, permissions and review — not vibe coding. The product is an agent-native, **read-only** surface over the point-of-sale database that already runs in a store: low stock, open customer credit, expiry, and a summary of the day, exposed as a JSON CLI and as an **MCP server**.
 
-O produto do case é uma **superfície agent-native** para o PDV que já roda na loja: consultas somente-leitura (estoque baixo, fiado em aberto, validade, resumo do dia) expostas por CLI em JSON e por **servidor MCP**, prontas para qualquer agente consumir.
+Nothing here connects to a live store: the repository carries code, a spec and tests. The demo runs against a generated fixture database.
 
-## Por que isso vale dinheiro
-- É demonstrável em 5 minutos: agente pergunta "quanto está fiado hoje?" e recebe JSON estruturado.
-- Prova três coisas que cliente paga: integração com sistema legado, contrato estável (JSON/schema), e segurança (read-only, sem credencial no código).
-- Diferencia proposta no Upwork de "mais um dev que usa ChatGPT": tem artefato auditável.
+## What it does
 
-## Estrutura
+| Query | Output |
+| --- | --- |
+| `resumo-hoje` | sales, revenue and credit granted for the current day |
+| `fiado` | customers with an open balance and the total owed |
+| `estoque-baixo` | products at or below minimum stock |
+| `validade` | lots past or near their expiry date |
+
+Every command opens SQLite in read-only mode (`mode=ro`) and prints one JSON object with a stable schema, so an agent can consume it without a parser.
+
+## Stack
+
+- **Python 3.11+** for the CLI (`pos-query/pos_query.py`) and the MCP wrapper (`pos-query/mcp_server.py`)
+- **SQLite** as the source, opened read-only
+- **pytest** for the contract tests; `tests/fixtures.py` builds a deterministic database
+- **MCP (Model Context Protocol) SDK 2.x** exposing the four queries as tools
+- **GitHub Actions** for CI, on Python 3.11 and 3.13
+
+## Run it
+
+```bash
+git clone https://github.com/FelipeFeerreira/pos-agent-surface.git
+cd pos-agent-surface
+python3 -m pip install pytest "mcp>=2,<3"
+
+# build a fixture database, then query it
+python tests/fixtures.py /tmp/fixture.db
+python pos-query/pos_query.py --db /tmp/fixture.db resumo-hoje
+python pos-query/pos_query.py --db /tmp/fixture.db estoque-baixo
 ```
-agentic-engineering-case/
-├── README.md          # este arquivo (o que é, por que importa, como demonstrar)
-├── SPEC.md            # a spec usada para dirigir o agente
-├── CHECKLIST.md       # o padrão de qualidade aplicado (agentic, não vibe)
-└── pos-query/
-    ├── pos_query.py   # CLI read-only (testada contra mercadinho.db)
-    ├── mcp_server.py  # wrapper MCP (não testado: pacote `mcp` ausente)
-    └── README.md      # uso, contrato de saída, como plugar no PDV
+
+The CLI never writes: if a database is passed without read-only access the process fails instead of mutating it.
+
+### MCP server
+
+```bash
+POS_DB=/tmp/fixture.db python pos-query/mcp_server.py
 ```
 
-## Testes
-`pytest -q tests/` cobre o contrato do CLI (somas, cancelamento, estorno, validade e read-only);
-o workflow em `.github/workflows/ci.yml` roda os testes em Python 3.11 e 3.13 e sobe o servidor MCP via stdio.
+The four queries are registered as tools, so any MCP-capable agent can ask "how much credit is open today?" and get structured JSON.
 
-## Estado (27/10/2026)
-- Publicado em [github.com/FelipeFeerreira/pos-agent-surface](https://github.com/FelipeFeerreira/pos-agent-surface).
-- Integrado ao PDV como `agent_surface/` na branch `feat/agent-surface`.
-- `pos_query.py`: **testado** contra o banco real, em modo somente-leitura (`mode=ro`).
-  - `resumo-hoje`: 20 vendas, R$ 274,71, R$ 22,97 a prazo.
-  - `fiado`: 24 clientes com saldo, soma R$ 1.291,41.
-  - `estoque-baixo`: encontrou estoque negativo (ex.: PAO FRANCES MARQUESPAN, -1.601 un.).
-  - `validade`: 1 lote vencido com saldo (COCA 600 ML, vencido em 12/10).
-- `mcp_server.py`: **testado** com o SDK MCP 2.x — 4 ferramentas expostas e `resumo_do_dia` chamado via stdio.
-- Nenhum banco, dado de cliente ou credencial foi publicado. O repositório contém apenas código e documentação.
+## Tests
 
-## Achados que já valem correção no PDV
-1. **Estoque negativo** em produtos de produção (pão): indica baixa de venda/consumo sem entrada correspondente. É o mesmo tipo de divergência que a oportunidade de conciliação de estoque ataca.
-2. **Lote vencido com saldo**: o controle de validade existe, mas não bloqueia venda nem alerta sozinho.
+```bash
+pytest -q tests/                                   # contract tests over the CLI
+python tests/fixtures.py /tmp/fixture.db
+POS_DB=/tmp/fixture.db python pos-query/test_mcp_smoke.py   # MCP smoke over stdio
+```
 
-## Próximos passos
-1. Rodar `python3 test_mcp_smoke.py` dentro de `pos-query/` em CI (GitHub Actions).
-2. Teste automatizado do saldo de fiado com pagamento estornado.
-3. Captura de tela de um agente consultando o PDV, no README.
-4. Corrigir no PDV: estoque negativo e bloqueio de venda de lote vencido.
+The CI workflow runs both commands on every push and pull request, on Python 3.11 and 3.13: [workflow](.github/workflows/ci.yml).
+
+The tests cover totals, cancellation and refund handling, expiry filtering and the read-only guarantee; the MCP smoke test starts the server over stdio and calls a tool end to end.
+
+## Repository layout
+
+```
+.
+├── SPEC.md               # the spec the agent worked from
+├── CHECKLIST.md          # the quality bar applied (agentic, not vibe coding)
+├── pos-query/
+│   ├── pos_query.py      # read-only CLI
+│   ├── mcp_server.py     # MCP wrapper
+│   └── README.md         # usage and output contract (Portuguese)
+└── tests/
+    ├── fixtures.py       # deterministic database
+    └── test_pos_query.py # contract tests
+```
+
+## Status and limits
+
+- The CLI and the MCP server are tested in CI against a fixture database.
+- Not tested here: the physical scale, the receipt printer and any Windows-specific path — those belong to the store deployment and are not part of this case.
+- The store database is private: no customer record, price table or credential is published in this repository.
+
+## Português
+
+Este repositório nasceu como um case em português sobre engenharia agêntica — a spec (`SPEC.md`), o checklist de qualidade (`CHECKLIST.md`) e o README do CLI continuam em português. O README principal ficou em inglês porque o público-alvo é recrutador e cliente remoto.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
